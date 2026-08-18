@@ -181,7 +181,6 @@ def gerar_nome_arquivo_download(data_range, min_date, max_date, salas_selecionad
 def analisar_excesso_vagas(df_raw, limite_vagas_map):
     header_idx = None
     for idx, row in df_raw.iterrows():
-        # Converte cada valor para string tratada, prevenindo erros com tipos mistos e nulos
         row_str = [str(val).upper().strip() for val in row.values if pd.notna(val)]
         
         has_sala = any("SALA" in s for s in row_str)
@@ -257,13 +256,16 @@ def analisar_excesso_vagas(df_raw, limite_vagas_map):
         events.sort(key=lambda x: (x[0], 0 if x[1] == 'saida' else 1))
         
         carros_presentes = []
-        contador_sessao = 0  # Contador cumulativo de entradas no bloco continuo
+        contador_sessao = 0
+        sessao_indices = set()
+        sessao_teve_excesso = False
         
         for time_pt, event_type, idx in events:
             if event_type == 'entrada':
                 carros_presentes.append(idx)
+                sessao_indices.add(idx)
                 
-                # Se o patio estava vazio, inicia uma nova sessao de contagem
+                # Se o pátio estava vazio, inicia uma nova sessão
                 if len(carros_presentes) == 1:
                     contador_sessao = 1
                 else:
@@ -281,17 +283,27 @@ def analisar_excesso_vagas(df_raw, limite_vagas_map):
                         "excedeu": excedeu_str
                     }
 
-                # Se a ocupacao no instante ultrapassou o limite ou se o carro entrou como excedente
-                if len(carros_presentes) > limite or posicao > limite:
-                    for c_idx in carros_presentes:
-                        envolvidos_indices.add(c_idx)
+                # Marca a sessão como com excesso se estourou a capacidade cumulativa ou física
+                if posicao > limite or len(carros_presentes) > limite:
+                    sessao_teve_excesso = True
 
             else:
                 if idx in carros_presentes:
                     carros_presentes.remove(idx)
-                # Quando todos os carros saem, reseta o contador cumulativo
+                
+                # Quando o pátio esvazia totalmente, consolida a sessão
                 if len(carros_presentes) == 0:
+                    if sessao_teve_excesso:
+                        envolvidos_indices.update(sessao_indices)
+                    
+                    # Reseta os manipuladores da sessão
+                    sessao_indices = set()
+                    sessao_teve_excesso = False
                     contador_sessao = 0
+
+        # Se o dia acabou e a sessão ainda estava aberta com excesso
+        if sessao_teve_excesso:
+            envolvidos_indices.update(sessao_indices)
 
     df_analisado = df_valid.loc[sorted(list(envolvidos_indices))].copy()
     
